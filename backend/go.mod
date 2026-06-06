@@ -1,4 +1,4 @@
-module github.com/Ethea2/solidjs-go-todos
+module github.com/Ethea2/solidjs-go-todos/backend
 
 go 1.26.3
 
