@@ -1,0 +1,97 @@
+name: app
+
+services:
+    # ── Frontend: Bun + Vite + SolidJS ─────────────────────────────────────────
+    frontend:
+        build:
+            context: ./frontend
+            target: dev # swap to "prod" for production builds
+        volumes:
+            - ./frontend:/app
+            - /app/node_modules # anonymous volume keeps container node_modules intact
+        environment:
+            - VITE_API_BASE_URL=/api
+        ports:
+            - "5173:5173" # direct access during development
+        depends_on:
+            - backend
+        restart: unless-stopped
+
+    # ── Backend: Go + Chi + Air ─────────────────────────────────────────────────
+    backend:
+        build:
+            context: ./backend
+            target: dev # swap to "prod" for production builds
+        volumes:
+            - ./backend:/app
+            - go-mod-cache:/root/go/pkg/mod # cache Go modules across rebuilds
+        environment:
+            - PORT=8080
+            - DB_HOST=postgres
+            - DB_PORT=5432
+            - DB_USER=${POSTGRES_USER}
+            - DB_PASSWORD=${POSTGRES_PASSWORD}
+            - DB_NAME=${POSTGRES_DB}
+            - DB_SSLMODE=disable
+        ports:
+            - "8080:8080" # direct access during development
+        depends_on:
+            postgres:
+                condition: service_healthy
+        restart: unless-stopped
+
+    # ── PostgreSQL ──────────────────────────────────────────────────────────────
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+            - ./postgres/init:/docker-entrypoint-initdb.d # optional init SQL scripts
+        ports:
+            - "5432:5432" # direct access from host (e.g. TablePlus, psql)
+        healthcheck:
+            test:
+                [
+                    "CMD-SHELL",
+                    "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+
+    # ── PGAdmin ─────────────────────────────────────────────────────────────────
+    pgadmin:
+        image: dpage/pgadmin4:latest
+        environment:
+            PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+            PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+            PGADMIN_CONFIG_SERVER_MODE: "False" # single-user desktop mode
+        volumes:
+            - pgadmin-data:/var/lib/pgadmin
+        ports:
+            - "5050:80"
+        depends_on:
+            - postgres
+        restart: unless-stopped
+
+    # ── NGINX reverse proxy ─────────────────────────────────────────────────────
+    nginx:
+        build:
+            context: ./nginx
+        ports:
+            - "80:80"
+            - "443:443" # ready for TLS; add certs volume when needed
+        depends_on:
+            - frontend
+            - backend
+        restart: unless-stopped
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+volumes:
+    postgres-data:
+    pgadmin-data:
+    go-mod-cache:
